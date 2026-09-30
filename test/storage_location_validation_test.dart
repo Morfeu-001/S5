@@ -127,7 +127,7 @@ class Fixture {
     service.peers[waiter.id] = waiter;
     service.hashQueryRoutingTable[hash] = {waiter.id};
     // Pending until socket closure; no socket exists in this fixture.
-    unawaited(service.onNewPeer(origin, verifyId: false));
+    unawaited(service.onNewPeer(origin, verifyId: false).catchError((_) {}));
     await Future<void>.delayed(Duration.zero);
     return Fixture(c, db, node, service, origin, waiter, hash);
   }

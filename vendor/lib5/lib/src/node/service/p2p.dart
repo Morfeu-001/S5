@@ -29,11 +29,15 @@ abstract class Peer {
   });
 
   String renderLocationUri();
+
+  Future<void> close() async {}
 }
 
 class WebSocketChannelPeer extends Peer {
   final WebSocketChannel _socket;
   final String locationUri;
+  StreamSubscription? _subscription;
+  bool _closed = false;
 
   WebSocketChannelPeer(
     this._socket, {
@@ -53,10 +57,17 @@ class WebSocketChannelPeer extends Peer {
     Function? onError,
     required Logger logger,
   }) {
-    // TODO Store subscription
-    _socket.stream.listen(
+    _subscription = _socket.stream.listen(
       (event) async {
-        await callback(event);
+        if (_closed) return;
+        try {
+          await callback(event);
+        } catch (e, st) {
+          // A refused record is not a transport disconnect. Letting this
+          // escape to the connection zone used to leak a socket on every retry.
+          logger.catched(e, st);
+          if (!isConnected) onError?.call(e);
+        }
       },
       onDone: onDone,
       onError: onError,
@@ -68,17 +79,36 @@ class WebSocketChannelPeer extends Peer {
   String renderLocationUri() {
     return locationUri;
   }
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    final closing = _socket.sink.close();
+    await _subscription?.cancel();
+    await closing.timeout(const Duration(seconds: 2));
+  }
 }
 
 class P2PService {
   final S5NodeBase node;
+  final int Function() _queryNow;
+  final WebSocketChannel Function(Uri) _connectChannel;
 
   late KeyPairEd25519 nodeKeyPair;
 
   String? networkId;
 
-  P2PService(this.node) {
+  P2PService(this.node, {int Function()? queryNow,
+      WebSocketChannel Function(Uri)? connectChannel})
+      : _queryNow = queryNow ?? _monotonicClock(),
+        _connectChannel = connectChannel ?? WebSocketChannel.connect {
     networkId = node.config['p2p']?['network'];
+  }
+
+  static int Function() _monotonicClock() {
+    final clock = Stopwatch()..start();
+    return () => clock.elapsedMilliseconds;
   }
 
   Logger get logger => node.logger;
@@ -89,11 +119,13 @@ class P2PService {
 
   final peers = <NodeID, Peer>{};
   final reconnectDelay = <NodeID, int>{};
+  final _connections = <NodeID>{};
 
   final List<Uri> selfConnectionUris = [];
 
-  // TODO clean this table after a while (default 1 hour)
+  // Pending queries are bounded and lazily expire after thirty seconds.
   final hashQueryRoutingTable = <Multihash, Set<NodeID>>{};
+  final _queryExpiry = <Multihash, int>{};
 
   Future<void> init(KeyValueDB nodesDB) async {
     localNodeId = NodeID(nodeKeyPair.publicKey);
@@ -134,6 +166,19 @@ class P2PService {
     }
 
     final completer = Completer();
+    void retirePeer() {
+      peer.isConnected = false;
+      try {
+        if (identical(peers[peer.id], peer)) peers.remove(peer.id);
+      } catch (_) { /* An incoming peer may fail before assigning its ID. */ }
+    }
+    final handshakeTimer = Timer(const Duration(seconds: 10), () {
+      if (!peer.isConnected && !completer.isCompleted) {
+        retirePeer();
+        completer.completeError('Handshake timeout');
+        unawaited(peer.close().catchError((_) {}));
+      }
+    });
 
     final supportedFeatures = 3; // 0b00000011
 
@@ -241,6 +286,7 @@ class P2PService {
             }
           }
           hashQueryRoutingTable.remove(hash);
+          _queryExpiry.remove(hash);
         }
 
         if (method == protocolMethodSignedMessage) {
@@ -269,16 +315,11 @@ class P2PService {
               }
             }
 
-            peer.isConnected = true;
-
             final supportedFeatures = u.unpackInt();
 
             if (supportedFeatures != 3) {
               throw 'Remote node does not support required features';
             }
-
-            peers[peer.id] = peer;
-            reconnectDelay[peer.id] = 1;
 
             final connectionUrisCount = u.unpackInt()!;
 
@@ -286,6 +327,11 @@ class P2PService {
             for (int i = 0; i < connectionUrisCount; i++) {
               peer.connectionUris.add(Uri.parse(u.unpackString()!));
             }
+
+            peer.isConnected = true;
+            handshakeTimer.cancel();
+            peers[peer.id] = peer;
+            reconnectDelay[peer.id] = 1;
 
             logger.info(
               '${'[+]'.green().bold()} ${peer.id.toString().green()} (${(peer.renderLocationUri()).toString().cyan()})',
@@ -346,7 +392,11 @@ class P2PService {
 
               final entry = map[availableNodes.first]!;
 
-              peer.sendMessage(entry.providerMessage);
+              if (availableNodes.first == localNodeId) {
+                _sendOwnLocation(peer, entry.providerMessage);
+              } else {
+                peer.sendMessage(entry.providerMessage);
+              }
 
               return;
             }
@@ -374,16 +424,28 @@ class P2PService {
 
             logger.verbose('[providing] $hash');
 
-            peer.sendMessage(message);
+            _sendOwnLocation(peer, message);
             return;
           }
 
+          final now = _queryNow();
+          final expired = _queryExpiry.entries
+              .where((entry) => entry.value <= now)
+              .map((entry) => entry.key).toList();
+          for (final stale in expired) {
+            hashQueryRoutingTable.remove(stale);
+            _queryExpiry.remove(stale);
+          }
           if (hashQueryRoutingTable.containsKey(hash)) {
             if (!hashQueryRoutingTable[hash]!.contains(peer.id)) {
-              hashQueryRoutingTable[hash]!.add(peer.id);
+              if (hashQueryRoutingTable[hash]!.length < 64) {
+                hashQueryRoutingTable[hash]!.add(peer.id);
+              }
             }
           } else {
+            if (hashQueryRoutingTable.length >= 4096) return;
             hashQueryRoutingTable[hash] = <NodeID>{peer.id};
+            _queryExpiry[hash] = now + 30000;
             for (final p in peers.values) {
               if (p.id != peer.id) {
                 p.sendMessage(event);
@@ -427,8 +489,7 @@ class P2PService {
       },
       onDone: () async {
         try {
-          if (peers.containsKey(peer.id)) {
-            peers.remove(peer.id);
+          if (identical(peers[peer.id], peer)) {
             logger.info(
               '${'[-]'.red().bold()} ${peer.id.toString().red()} (${(peer.renderLocationUri()).toString().cyan()})',
             );
@@ -436,16 +497,20 @@ class P2PService {
         } catch (_) {
           logger.info('[-] ${peer.renderLocationUri()}');
         }
-        completer.completeError('onDone');
+        retirePeer();
+        if (!completer.isCompleted) completer.completeError('onDone');
       },
       onError: (e) {
-        logger.warn('${peer.id}: $e');
+        retirePeer();
+        logger.warn('${peer.renderLocationUri()}: $e');
+        if (!completer.isCompleted) completer.completeError(e);
+        unawaited(peer.close().catchError((_) {}));
       },
       logger: logger,
     );
     peer.sendMessage(initialAuthPayloadPacker.takeBytes());
 
-    return completer.future;
+    return completer.future.whenComplete(handshakeTimer.cancel);
   }
 
   Future<Uint8List> prepareProvideMessage(
@@ -470,6 +535,17 @@ class P2PService {
     );
 
     return Uint8List.fromList(list + nodeKeyPair.publicKey + signature);
+  }
+
+  void _sendOwnLocation(Peer requester, Uint8List message) {
+    requester.sendMessage(message);
+    // Share only this demanded, locally provided record. Connected relays may
+    // still have pending routes from before this provider became available.
+    // This is not a scan or periodic reannouncement of the object inventory.
+    for (final relay in peers.values.toList()) {
+      if (identical(relay, requester) || relay.id == requester.id || !relay.isConnected) continue;
+      try { relay.sendMessage(message); } catch (e, st) { logger.catched(e, st); }
+    }
   }
 
   void sendPublicPeersToPeer(Peer peer, Iterable<Peer> peersToSend) async {
@@ -628,7 +704,10 @@ class P2PService {
     if (id == localNodeId) {
       return;
     }
+    if (_connections.contains(id) || peers[id]?.isConnected == true) return;
+    _connections.add(id);
     bool retried = false;
+    WebSocketChannelPeer? ownedPeer;
     runZonedGuarded(
       () async {
         logger.verbose('[connect] $connectionUri');
@@ -650,16 +729,17 @@ class P2PService {
             userInfo: '',
           );
 
-          final channel = WebSocketChannel.connect(
+          final channel = _connectChannel(
             locationUri,
           );
 
-          await onNewPeer(
-            WebSocketChannelPeer(
+          ownedPeer = WebSocketChannelPeer(
               channel,
               locationUri: locationUri.toString(),
               connectionUris: [connectionUri],
-            )..id = id,
+            )..id = id;
+          await onNewPeer(
+            ownedPeer!,
             verifyId: true,
           );
         }
@@ -667,6 +747,13 @@ class P2PService {
       (e, st) async {
         if (retried) return;
         retried = true;
+
+        final old = ownedPeer;
+        if (old != null) {
+          old.isConnected = false;
+          if (identical(peers[id], old)) peers.remove(id);
+          try { await old.close(); } catch (_) { /* Close was attempted; retry remains bounded. */ }
+        }
 
         /*   if (e is SocketException) {
           if (e.message == 'Connection refused') {
@@ -678,10 +765,10 @@ class P2PService {
         logger.catched(e, st);
         /*  } */
 
-        final delay = reconnectDelay[id]!;
-        reconnectDelay[id] = delay * 2;
+        final delay = reconnectDelay[id]!.clamp(1, 60);
+        reconnectDelay[id] = (delay * 2).clamp(1, 60);
         await Future.delayed(Duration(seconds: delay));
-
+        _connections.remove(id);
         connectToNode(connectionUris);
       },
     );
