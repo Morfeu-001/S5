@@ -12,6 +12,4 @@ dependency_overrides:
       url: https://github.com/redsolver/filesize.git
       ref: ff1e357147ee57f8398270adf156b55c6143b352
   minio:
-    git:
-      url: https://github.com/redsolver/minio-dart.git
-      ref: c0ddd199a4edabb0fa78d553a89b08944fc1c137
+    path: vendor/minio

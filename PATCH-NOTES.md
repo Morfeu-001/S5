@@ -2,7 +2,7 @@
 
 Local derivative of official S5 tag v0.14.1, commit `7b9fc6def87644c66c33274f9a6b217a29231efd`. This is not an unmodified official binary or a new upstream release.
 
-`vendor/lib5` originates from the official lib5 0.2.0 archive whose SHA256 is `cd3d867a150bb7aacd07cfd23729da75cc2416b9c4099d722e499bfaa392e7b7`, matching the original server lockfile. `pubspec_overrides.yaml` uses this directory and fixes all three upstream Git dependencies to their original lockfile revisions, preserving the original http1.0.0 override. No dependency version upgrade is intended.
+`vendor/lib5` originates from the official lib5 0.2.0 archive whose SHA256 is `cd3d867a150bb7aacd07cfd23729da75cc2416b9c4099d722e499bfaa392e7b7`, matching the original server lockfile. `pubspec_overrides.yaml` uses this directory and preserves the historical dependency revisions and http1.0.0 override. The later clean-install correction vendors the unchanged MinIO 3.5.0 files because its historical commit is no longer in the Git mirror's advertised refs; see `vendor/minio/PROVENANCE.md`. No dependency version was upgraded.
 
 The P2P storage-location receiver previously awaited Ed25519 verification but discarded its boolean result before persisting and forwarding the record. It also allowed an authentic expired record to replace a current claim. The patch checks framing, expiry, and the signature before any cache write, forwarding, or removal of the pending routing entry. It preserves valid archive records with zero parts and the existing binary protocol.
 

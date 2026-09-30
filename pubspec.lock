@@ -357,11 +357,9 @@ packages:
   minio:
     dependency: "direct main"
     description:
-      path: "."
-      ref: c0ddd199a4edabb0fa78d553a89b08944fc1c137
-      resolved-ref: c0ddd199a4edabb0fa78d553a89b08944fc1c137
-      url: "https://github.com/redsolver/minio-dart.git"
-    source: git
+      path: "vendor/minio"
+      relative: true
+    source: path
     version: "3.5.0"
   node_preamble:
     dependency: transitive

@@ -3,7 +3,11 @@
 Derivado de S5 v0.14.1, base `7b9fc6def87644c66c33274f9a6b217a29231efd`.
 Não é uma release oficial upstream. `vendor/lib5` conserva a licença original
 e a proveniência do pacote 0.2.0 registrada em `PATCH-NOTES.md`; os Git refs e
-versões do lockfile são fixados. Nenhuma identidade privada entra no repositório.
+versões do lockfile são fixados. MinIO 3.5.0 também está em `vendor/minio`, sem
+alteração de código: seu commit histórico não aparece mais nas refs clonadas
+pelo mirror do Dart. A instalação limpa reproduziu a falha e passou após usar
+os mesmos arquivos originais, conferidos por Git blob SHA-1. Nenhuma versão de
+dependência foi atualizada. Nenhuma identidade privada entra no repositório.
 
 ## Problema observado em 30/09/2026
 
