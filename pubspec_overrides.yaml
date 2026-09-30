@@ -1,0 +1,15 @@
+# Git dependencies are pinned to the upstream v0.14.1 lockfile; no HEAD drift.
+dependency_overrides:
+  http: 1.0.0
+  lib5:
+    path: vendor/lib5
+  alfred:
+    git:
+      url: https://github.com/redsolver/alfred.git
+      ref: 5d816dce9ff262fafd3c7840a4e3a545d41d0fb0
+  filesize:
+    git:
+      url: https://github.com/redsolver/filesize.git
+      ref: ff1e357147ee57f8398270adf156b55c6143b352
+  minio:
+    path: vendor/minio

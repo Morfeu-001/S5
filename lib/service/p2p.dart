@@ -7,6 +7,8 @@ import 'package:lib5/util.dart';
 
 class WebSocketPeer extends Peer {
   final WebSocket _socket;
+  StreamSubscription? _subscription;
+  bool _closed = false;
 
   WebSocketPeer(
     this._socket, {
@@ -25,9 +27,15 @@ class WebSocketPeer extends Peer {
     Function? onError,
     required Logger logger,
   }) {
-    final sub = _socket.listen(
+    _subscription = _socket.listen(
       (event) async {
-        await callback(event);
+        if (_closed) return;
+        try {
+          await callback(event);
+        } catch (e, st) {
+          logger.catched(e, st);
+          if (!isConnected) onError?.call(e);
+        }
       },
       onDone: onDone,
       onError: onError,
@@ -38,6 +46,15 @@ class WebSocketPeer extends Peer {
   @override
   String renderLocationUri() {
     return 'WebSocket client';
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    final closing = _socket.close();
+    await _subscription?.cancel();
+    await closing.timeout(const Duration(seconds: 2));
   }
 }
 

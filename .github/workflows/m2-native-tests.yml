@@ -1,0 +1,26 @@
+name: M2 native S5
+on:
+  pull_request:
+  push:
+    branches: [codex/m2-s5-provider]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.3.1'
+      - run: dart pub get --enforce-lockfile
+      - name: Analyze changed runtime and regressions
+        run: dart analyze lib/store/remote_locations.dart lib/service/p2p.dart test/p2p_lifecycle_test.dart vendor/lib5/lib/src/node/service/p2p.dart
+      - run: dart test -r expanded
+      - name: Compile Linux AOT
+        run: dart compile aot-snapshot bin/s5_server.dart -o s5_server.aot
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s5-classic-m2-linux-aot
+          path: s5_server.aot
+          retention-days: 14

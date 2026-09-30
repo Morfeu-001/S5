@@ -13,7 +13,7 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: HEAD
+      ref: "5d816dce9ff262fafd3c7840a4e3a545d41d0fb0"
       resolved-ref: "5d816dce9ff262fafd3c7840a4e3a545d41d0fb0"
       url: "https://github.com/redsolver/alfred.git"
     source: git
@@ -214,7 +214,7 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: HEAD
+      ref: ff1e357147ee57f8398270adf156b55c6143b352
       resolved-ref: ff1e357147ee57f8398270adf156b55c6143b352
       url: "https://github.com/redsolver/filesize.git"
     source: git
@@ -302,10 +302,9 @@ packages:
   lib5:
     dependency: "direct main"
     description:
-      name: lib5
-      sha256: cd3d867a150bb7aacd07cfd23729da75cc2416b9c4099d722e499bfaa392e7b7
-      url: "https://pub.dev"
-    source: hosted
+      path: "vendor/lib5"
+      relative: true
+    source: path
     version: "0.2.0"
   lints:
     dependency: "direct dev"
@@ -358,11 +357,9 @@ packages:
   minio:
     dependency: "direct main"
     description:
-      path: "."
-      ref: HEAD
-      resolved-ref: c0ddd199a4edabb0fa78d553a89b08944fc1c137
-      url: "https://github.com/redsolver/minio-dart.git"
-    source: git
+      path: "vendor/minio"
+      relative: true
+    source: path
     version: "3.5.0"
   node_preamble:
     dependency: transitive
