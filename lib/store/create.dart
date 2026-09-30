@@ -10,6 +10,7 @@ import 'fs_provider.dart';
 import 'ipfs.dart';
 import 'local.dart';
 import 'pixeldrain.dart';
+import 'remote_locations.dart';
 import 's3.dart';
 import 'sia.dart';
 
@@ -24,11 +25,23 @@ Map<String, ObjectStore> createStoresFromConfig(
   final pixeldrainConfig = config['store']?['pixeldrain'];
   final ipfsConfig = config['store']?['ipfs'];
   final fileSystemConfig = config['store']?['fs'];
+  final remoteConfig = config['store']?['remote_locations'];
 
   final arweaveConfig = config['store']?['arweave'];
   final estuaryConfig = config['store']?['estuary'];
 
   final stores = <String, ObjectStore>{};
+
+  if (remoteConfig != null) {
+    if (remoteConfig is! Map || remoteConfig['path'] is! String ||
+        (remoteConfig['ttlSeconds'] != null && remoteConfig['ttlSeconds'] is! int) ||
+        remoteConfig.keys.any((key) => key != 'path' && key != 'ttlSeconds')) {
+      throw ArgumentError('remote_location_invalid_config');
+    }
+    stores['remote_locations'] = RemoteLocationObjectStore(
+      Directory(remoteConfig['path']), ttlSeconds: remoteConfig['ttlSeconds'] ?? 300,
+    );
+  }
 
   if (s3Config != null) {
     final String endpointUrl = s3Config['endpointUrl'] ?? s3Config['endpoint'];
